@@ -1,6 +1,6 @@
 from sshtunnel import SSHTunnelForwarder
 import pymongo
-
+import pyspark
 def connection_create():
     MONGO_HOST = "10.4.41.45"
     MONGO_USER = "bdm"
@@ -32,3 +32,13 @@ db=mongo_db
 for collection in collections:
     count = db[collection].count_documents({})
     print(f"Collection {collection} has {count} documents")
+
+print(pyspark.__version__)
+import pkg_resources
+
+installed_packages = [pkg.key for pkg in pkg_resources.working_set]
+if 'mongo-spark-connector' in installed_packages:
+    version = pkg_resources.get_distribution('mongo-spark-connector').version
+    print(f"mongo-spark-connector version: {version}")
+else:
+    print("mongo-spark-connector is not installed.")
