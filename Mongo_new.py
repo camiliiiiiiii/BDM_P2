@@ -78,12 +78,18 @@ if df:
     columns = ["date"] + df.columns[:-1]
     df = df.select(columns)
 
-    idealista_ne_RDD = df.rdd
+    idealista_RDD = df.rdd
 else:
     print("No valid files found")
 
+#count distinct number
 
+sample_records =idealista_RDD.take(1)
+for record in sample_records:
+    print(record)
 
+distinct_property_codes_count = idealista_RDD.map(lambda row: row.propertyCode).distinct().count()
+print("Distinct propertyCode count:", distinct_property_codes_count)
 #####
 
 ##RENT-OPENDATA
@@ -182,18 +188,54 @@ for record in sample_records:
     print(record)
 
 
-## JOIN IDEALISTA + INCOME + RENT OPEN DATA
-income_rent_rent_opendata_ne_join = rdd_income_rent_opendata_ne.join(income_lookup_ne_RDD).cache()
-join_p1= income_rent_rent_opendata_ne_join.map(lambda x: (x[1][1][1], Row(neigh_name=x[1][1][0],
-                                                                 avg_pop=x[1][0][0],
-                                                                 avg_RDF=x[1][0][1],
-                                                                 avg_rent=x[1][0][2]))).cache()
-sample_records = join_p1.take(1)
+##IDEALISTA
+
+idealista_ne_RDD = idealista_RDD\
+    .map(lambda x: (x['propertyCode'], x))\
+    .reduceByKey(max)\
+    .map(lambda x: (x[1]['date'], x))\
+    .map(lambda x: (x[1][1]['neighborhood'], x[1]))\
+    .cache()
+print(idealista_ne_RDD.count())
+idealista_ne_RDD.take(1)
+
+sample_records =idealista_ne_RDD.take(1)
 for record in sample_records:
     print(record)
 
+idealista_ne_RDD = idealista_ne_RDD.map(lambda x: (x[0],
+    Row(property_id=x[1][0],
+        rooms=x[1][1]['rooms'],
+        bathrooms=x[1][1]['bathrooms'],
+        size=x[1][1]['size'],
+        price=x[1][1]['price'],
+        status= x[1][1]['status'],
+        hasLift =x[1][1]['hasLift'],
+        priceByArea=x[1][1]['priceByArea'])
+)).cache()
 
-########
+sample_records =idealista_ne_RDD.take(1)
+for record in sample_records:
+    print(record)
+
+sample_records =rent_lookup_ne_RDD.take(1)
+for record in sample_records:
+    print("lookup:",record)
 
 
 
+join_idealista = idealista_ne_RDD.join(rent_lookup_ne_RDD).cache()
+
+sample_records =join_idealista.take(1)
+for record in sample_records:
+    print("join_idealista_lookup:",record)
+
+
+join_idealista_t = join_idealista.map(lambda x: (x[1][1][1], Row(neigh=x[1][1][0], property_id=x[1][0][0], rooms=x[1][0][1],
+                                   bathrooms=x[1][0][2],size=x[1][0][3], price=x[1][0][4],status= x[1][0][5],
+                                    hasLift=x[1][0][6],priceByArea=x[1][0][7])))\
+                                    .cache()
+
+sample_records= join_idealista_t.take(1)
+for record in sample_records:
+    print(record)
