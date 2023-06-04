@@ -36,9 +36,10 @@ rent_lookup_ne_RDD = spark.read.format("mongo") \
     .load().rdd
 
 # Income
-income_ne_RDD = spark.read.format("mongo") \
+income_RDD = spark.read.format("mongo") \
     .option('uri', 'mongodb://10.4.41.45/BDM_P2.income') \
-    .load()
+    .load() \
+    .rdd
 
 
 # Rent extra dataset
@@ -114,27 +115,53 @@ for record in sample_records:
 
 ### INCOME
 
+
+##LOOK UP TABLE
+# Income  RDDs
+sample_records = income_RDD.take(5)
+print(income_RDD.count())
+
+for record in sample_records:
+    print('income_RDD:',record)
+
 def avg_pop(rows):
-    list_population=[]
-    for i in range(0,len(rows)):
-        list_population.append(rows[i][1])
-    return round(sum(list_population) / len(list_population),2)
+    list_population = []
+    max_year = 0
+    for row in rows:
+        year = row.year
+        if year > max_year:
+            max_year = year
+            list_population = [row.pop]
+        elif year == max_year:
+            list_population.append(row.pop)
+    if len(list_population) > 0:
+        return round(sum(list_population) / len(list_population), 2)
+    else:
+        return 0
 
 def avg_income(rows):
-    list_RDF=[]
-    for i in range(0,len(rows)):
-        list_RDF.append(rows[i][2])
-    return round(sum(list_RDF) / len(list_RDF),2)
+    list_RDF = []
+    max_year = 0
+    for row in rows:
+        year = row.year
+        if year > max_year:
+            max_year = year
+            list_RDF = [row.RFD]
+        elif year == max_year:
+            list_RDF.append(row.RFD)
+    if len(list_RDF) > 0:
+        return round(sum(list_RDF) / len(list_RDF), 2)
+    else:
+        return 0
 
-# Income  RDDs
-sample_records = income_ne_RDD.take(5)
-print(income_ne_RDD.count())
+# Original code
+sample_records = income_RDD.take(5)
+print(income_RDD.count())
 for record in sample_records:
     print(record)
 
-rdd_income_ne = income_ne_RDD.rdd \
-    .filter(lambda x: any(row.year == 2020 or row.year == 2021 or row.year == 2022 for row in x[3])) \
-    .map(lambda x: (x[4], avg_pop(x[3]), avg_income(x[3]))) \
+rdd_income_ne = income_RDD \
+    .map(lambda x: (x.district_name, avg_pop(x.info), avg_income(x.info))) \
     .map(lambda x: (x[0], list(x[1:]))) \
     .cache()
 
@@ -156,8 +183,7 @@ for record in sample_records:
 
 
 ## JOIN IDEALISTA + INCOME + RENT OPEN DATA
-lookup_income_rent_opendata_ne = income_lookup_ne_RDD.map(lambda x: (x[1], (x[3], x[0]))).cache()
-income_rent_rent_opendata_ne_join = rdd_income_rent_opendata_ne.join(lookup_income_rent_opendata_ne).cache()
+income_rent_rent_opendata_ne_join = rdd_income_rent_opendata_ne.join(income_lookup_ne_RDD).cache()
 join_p1= income_rent_rent_opendata_ne_join.map(lambda x: (x[1][1][1], Row(neigh_name=x[1][1][0],
                                                                  avg_pop=x[1][0][0],
                                                                  avg_RDF=x[1][0][1],
@@ -165,3 +191,9 @@ join_p1= income_rent_rent_opendata_ne_join.map(lambda x: (x[1][1][1], Row(neigh_
 sample_records = join_p1.take(1)
 for record in sample_records:
     print(record)
+
+
+########
+
+
+
