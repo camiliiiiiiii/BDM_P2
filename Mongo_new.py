@@ -127,21 +127,41 @@ def avg_income(rows):
     return round(sum(list_RDF) / len(list_RDF),2)
 
 # Income  RDDs
+sample_records = income_ne_RDD.take(5)
+print(income_ne_RDD.count())
+for record in sample_records:
+    print(record)
 
 rdd_income_ne = income_ne_RDD.rdd \
+    .filter(lambda x: any(row.year == 2020 or row.year == 2021 or row.year == 2022 for row in x[3])) \
     .map(lambda x: (x[4], avg_pop(x[3]), avg_income(x[3]))) \
     .map(lambda x: (x[0], list(x[1:]))) \
     .cache()
 
+print("Count after filter income: ", rdd_income_ne.count())
+sample_records = rdd_income_ne.take(2)
+for record in sample_records:
+    print(record)
 
-# We join the two RDDs using the key:
-rdd_income_rent = rent_extra_ne_num_RDD \
+# JOIN INCOME + RENT OPEN DATA
+
+rdd_income_rent_opendata_ne = rent_extra_ne_num_RDD \
     .join(rdd_income_ne) \
-    .map(lambda x: (x[0], Row(avg_pop=x[1][1][0], avg_income=x[1][1][1], avg_rent=x[1][0][0]))) \
+    .map(lambda x: Row(_id=x[0], avg_pop=x[1][1][0], avg_income=x[1][1][1], avg_rent=x[1][0])) \
     .cache()
 
-lookup_income_rent = income_lookup_ne_RDD.map(lambda x: (x[1]))
+sample_records = rdd_income_rent_opendata_ne.take(1)
+for record in sample_records:
+    print(record)
 
-result = rdd_income_rent.collect()
-for item in result:
-    print(item)
+
+## JOIN IDEALISTA + INCOME + RENT OPEN DATA
+lookup_income_rent_opendata_ne = income_lookup_ne_RDD.map(lambda x: (x[1], (x[3], x[0]))).cache()
+income_rent_rent_opendata_ne_join = rdd_income_rent_opendata_ne.join(lookup_income_rent_opendata_ne).cache()
+join_p1= income_rent_rent_opendata_ne_join.map(lambda x: (x[1][1][1], Row(neigh_name=x[1][1][0],
+                                                                 avg_pop=x[1][0][0],
+                                                                 avg_RDF=x[1][0][1],
+                                                                 avg_rent=x[1][0][2]))).cache()
+sample_records = join_p1.take(1)
+for record in sample_records:
+    print(record)
