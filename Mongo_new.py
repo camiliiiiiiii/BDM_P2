@@ -122,7 +122,6 @@ for record in sample_records:
 ### INCOME
 
 
-##LOOK UP TABLE
 # Income  RDDs
 sample_records = income_RDD.take(5)
 print(income_RDD.count())
@@ -167,7 +166,7 @@ for record in sample_records:
     print(record)
 
 rdd_income_ne = income_RDD \
-    .map(lambda x: (x.district_name, avg_pop(x.info), avg_income(x.info))) \
+    .map(lambda x: (x[4], avg_pop(x[3]), avg_income(x[3])))\
     .map(lambda x: (x[0], list(x[1:]))) \
     .cache()
 
@@ -176,16 +175,38 @@ sample_records = rdd_income_ne.take(2)
 for record in sample_records:
     print(record)
 
+
+
 # JOIN INCOME + RENT OPEN DATA
 
 rdd_income_rent_opendata_ne = rent_extra_ne_num_RDD \
     .join(rdd_income_ne) \
-    .map(lambda x: Row(_id=x[0], avg_pop=x[1][1][0], avg_income=x[1][1][1], avg_rent=x[1][0])) \
+    .map(lambda x: (x[0], Row(avg_pop=x[1][1][0], avg_income=x[1][1][1], avg_rent=x[1][0]))) \
     .cache()
 
 sample_records = rdd_income_rent_opendata_ne.take(1)
 for record in sample_records:
     print(record)
+
+
+sample_records = income_lookup_ne_RDD.take(1)
+for record in sample_records:
+    print("lookup:",record)
+
+lookup_income_rent = income_lookup_ne_RDD.map(lambda x: (x[1], (x[3], x[0]))).cache()
+join_income_rent = rdd_income_rent_opendata_ne.join(lookup_income_rent).cache()
+
+sample_records = lookup_income_rent.take(1)
+for record in sample_records:
+    print("join income-lookup:",record)
+
+#%%
+join_p1= join_income_rent.map(lambda x: (x[1][1][1], Row(neigh_name=x[1][1][0],
+                                                                 avg_pop=x[1][0][0],
+                                                                 avg_income=x[1][0][1],
+                                                                 avg_rent=x[1][0][2]))).cache()
+join_p1.take(1)
+
 
 
 ##IDEALISTA
@@ -216,26 +237,53 @@ idealista_ne_RDD = idealista_ne_RDD.map(lambda x: (x[0],
 
 sample_records =idealista_ne_RDD.take(1)
 for record in sample_records:
-    print(record)
+    print("idealista_rdd:",record)
 
-sample_records =rent_lookup_ne_RDD.take(1)
+
+lookup_idealista = rent_lookup_ne_RDD.map(lambda x: (x[1], (x[3], x[0]))).cache()
+
+sample_records =lookup_idealista.take(1)
 for record in sample_records:
-    print("lookup:",record)
+    print("idealista_look_up:",record)
 
-
-
-join_idealista = idealista_ne_RDD.join(rent_lookup_ne_RDD).cache()
+join_idealista = idealista_ne_RDD.join(lookup_idealista).cache()
 
 sample_records =join_idealista.take(1)
 for record in sample_records:
-    print("join_idealista_lookup:",record)
+    print("join_idealista:",record)
 
-
-join_idealista_t = join_idealista.map(lambda x: (x[1][1][1], Row(neigh=x[1][1][0], property_id=x[1][0][0], rooms=x[1][0][1],
-                                   bathrooms=x[1][0][2],size=x[1][0][3], price=x[1][0][4],status= x[1][0][5],
+join_idealista_f = join_idealista.map(lambda x: (x[1][1][1],Row(neigh=x[1][1][0], property_id=x[1][0][0], rooms=x[1][0][1],
+                                   bathrooms=x[1][0][2],size=x[1][0][3], price=x[1][0][4],status=x[1][0][5],
                                     hasLift=x[1][0][6],priceByArea=x[1][0][7])))\
                                     .cache()
 
-sample_records= join_idealista_t.take(1)
+sample_records= join_idealista_f.take(1)
 for record in sample_records:
-    print(record)
+    print("idealista_f: ",record)
+
+sample_records= join_p1.take(1)
+for record in sample_records:
+    print("join-income-rent: ",record)
+
+final_result1 = join_idealista_f.join(join_p1).cache()
+sample_records= final_result1.take(3)
+for record in sample_records:
+    print("pre-final: ",record)
+
+final_result_ff = final_result1.map(lambda x: Row(neigh_id=x[0], neigh=x[1][0][0], avg_pop=x[1][1][1], avg_income=x[1][1][2],
+                                avg_rent=x[1][1][3],property_id=x[1][0][1], rooms=x[1][0][2],
+                                   bathrooms=x[1][0][3],size=x[1][0][4], price=x[1][0][5],status=x[1][0][6],
+                                    hasLift=x[1][0][7],priceByArea=x[1][0][8]))
+sample_records= final_result_ff.take(3)
+for record in sample_records:
+    print("final: ",record)
+
+df = final_result_ff.toDF()
+type(df)
+
+final_result_ff.toDF().printSchema()
+final_result_ff.toDF().show()
+
+df.coalesce(1).write.format('json').save('final_results.json')
+df.write.format('com.mongodb.spark.sql.DefaultSource').option( "uri", f"mongodb://10.4.41.45/Formatted_BDM_P2.Final_results").save()
+
