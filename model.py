@@ -1,7 +1,7 @@
 import findspark
 from pyspark.ml.feature import OneHotEncoder
 findspark.init()
-from pyspark.sql.functions import col, sum
+from pyspark.sql.functions import col, sum, round, avg
 from pyspark.sql.functions import split, when, col
 from pyspark.sql.types import IntegerType
 from pyspark.ml.feature import StringIndexer, OneHotEncoderEstimator, VectorAssembler
@@ -10,7 +10,7 @@ from pyspark.ml.feature import IndexToString
 from pyspark.ml import Pipeline
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql import Window
+
 
 
 # Create a SparkSession
@@ -61,20 +61,35 @@ final_table_rdd = final_table_df.rdd
 
 
 # 1. Average price per neighborhood
-avg_price_neighborhood = final_table_df.groupBy("neigh_id").avg("price")
+avg_price_neighborhood = final_table_df.groupBy("neigh_id", "neigh").avg("price")
+avg_price_neighborhood = avg_price_neighborhood.withColumn("avg_price_rounded", round(col("avg(price)"), 2))
+avg_price_neighborhood = avg_price_neighborhood.drop("avg(price)")
 avg_price_neighborhood.show()
 
 # 2. Correlation between price and family income per neighborhood
-correlation_rent_income = final_table_df.groupBy("neigh_id").agg(
-    F.corr("avg_rent", "avg_income").alias("corr_rent_income")
-)
-correlation_rent_income.show()
+
+avg_rent_income_neighborhood = final_table_df.groupBy("neigh_id", "neigh").agg(F.avg("avg_rent").alias("average_rent"), F.avg("avg_income").alias("average_income"))
+avg_rent_income_neighborhood.show()
 
 # 3. Correlation between neighborhood and average rent
-correlation_neighborhood_rent = final_table_df.groupBy("neigh_id").agg(
-    F.corr("neigh_id", "avg_rent").alias("correlation_rent")
-)
-correlation_neighborhood_rent.show()
+# Get distinct status values
+distinct_status_values = final_table_df.select("status").distinct().rdd.flatMap(lambda x: x).collect()
+
+# Calculate count of properties for each status per neighborhood
+status_counts_per_neighborhood = final_table_df.groupBy("neigh_id", "neigh").pivot("status").count()
+
+# Fill missing values with 0 for status values that are not present in a neighborhood
+for status_value in distinct_status_values:
+    status_counts_per_neighborhood = status_counts_per_neighborhood.fillna(0, subset=status_value)
+
+status_counts_per_neighborhood.show()
+# 4. Average number of rooms and average price by neighborhood
+kpiDF = final_table_df.groupBy("neigh_id", "neigh").agg(avg('rooms').alias('Average Number of Rooms'), avg('price').alias('Average Price'))
+# Show the KPI DataFrame
+rounded_4kpiDF = kpiDF.withColumn("Average Number of Rooms", round("Average Number of Rooms", 2)).withColumn("Average Price", round("Average Price", 2))
+
+# Show the rounded KPI DataFrame
+rounded_4kpiDF.show()
 
 #PREDICTIVE KPI
 subset_data = final_table_df.select('neigh_id', 'price','status')
