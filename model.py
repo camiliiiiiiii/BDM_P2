@@ -1,29 +1,22 @@
 import findspark
-from pyspark import Row, SparkContext
-from pyspark.ml import Pipeline
-from pyspark.ml.classification import RandomForestClassifier
-from pyspark.sql.functions import lit
-from functools import reduce
-from pyspark.sql.types import FloatType, IntegerType
-from pyspark.ml.feature import OneHotEncoder, IndexToString
-from pyspark.ml.feature import StringIndexer
-from pyspark.ml.regression import LinearRegression
-from pyspark.ml.evaluation import RegressionEvaluator, MulticlassClassificationEvaluator
-
-from pyspark.ml.feature import VectorAssembler
-import pandas as pd
-from pymongo import MongoClient
+from pyspark.ml.feature import OneHotEncoder
 findspark.init()
-import os
-import re
-import datetime
-from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, sum
+from pyspark.sql.functions import split, when, col
+from pyspark.sql.types import IntegerType
+from pyspark.ml.feature import StringIndexer, OneHotEncoderEstimator, VectorAssembler
+from pyspark.ml.classification import RandomForestClassifier
+from pyspark.ml.feature import IndexToString
+from pyspark.ml import Pipeline
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql import Window
+
 
 # Create a SparkSession
 spark = SparkSession.builder \
     .appName("myApp") \
-    .config('spark.jars.packages', 'org.mongodb.spark:mongo-spark-connector_2.12:3.0.1') \
+    .config('spark.jars.packages', 'org.mongodb.spark:mongo-spark-connector_2.12:3.0.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.1.2') \
     .getOrCreate()
 
 
@@ -45,6 +38,7 @@ na_counts = final_table_df.agg(*[
     sum(col(column).isNull().cast("int")).alias(column + "_na_count")
     for column in final_table_df.columns
 ])
+na_counts.show()
 
 final_table_df = final_table_df.dropna(subset=["hasLift"])
 final_table_df.show()
@@ -58,17 +52,42 @@ final_table_df = final_table_df.withColumn("price", final_table_df["price"].cast
 final_table_df = final_table_df.withColumn("priceByArea", final_table_df["priceByArea"].cast(IntegerType()))
 final_table_df = final_table_df.withColumn("size", final_table_df["size"].cast(IntegerType()))
 final_table_df = final_table_df.withColumn("rooms", final_table_df["rooms"].cast(IntegerType()))
+final_table_df = final_table_df.fillna({'neigh_id': 'missing', 'rooms': 0.0, 'price': 0.0})
+final_table_df = final_table_df.na.drop()
+final_table_rdd = final_table_df.rdd
 
-final_table_df.printSchema()
+#####
+#DESCRIPTIVE KPI
 
-subset_data = final_table_df.select('neigh_id', 'price', 'rooms','status')
-labelIndexer_rooms = StringIndexer(inputCol="rooms", outputCol="indexed_rooms").fit(subset_data).setHandleInvalid("keep")
+
+# 1. Average price per neighborhood
+avg_price_neighborhood = final_table_df.groupBy("neigh_id").avg("price")
+avg_price_neighborhood.show()
+
+# 2. Correlation between price and family income per neighborhood
+correlation_rent_income = final_table_df.groupBy("neigh_id").agg(
+    F.corr("avg_rent", "avg_income").alias("corr_rent_income")
+)
+correlation_rent_income.show()
+
+# 3. Correlation between neighborhood and average rent
+correlation_neighborhood_rent = final_table_df.groupBy("neigh_id").agg(
+    F.corr("neigh_id", "avg_rent").alias("correlation_rent")
+)
+correlation_neighborhood_rent.show()
+
+#PREDICTIVE KPI
+subset_data = final_table_df.select('neigh_id', 'price','status')
+
 labelIndexer_status = StringIndexer(inputCol="status", outputCol="indexed_status").fit(subset_data).setHandleInvalid("keep")
-indexers = [StringIndexer(inputCol=column, outputCol=column + "-index").fit(subset_data).setHandleInvalid("keep") for column in ['neigh_id']]
-ohe_single_col = OneHotEncoder(inputCol="neigh_id-index", outputCol="neigh_id-onehot")
-assembler = VectorAssembler(inputCols=['neigh_id-onehot', 'indexed_rooms', 'price'], outputCol="indexed_features")
+indexers = [StringIndexer(inputCol=column, outputCol=column + "_index").fit(subset_data).setHandleInvalid("keep") for column in ['neigh_id']]
+ohe_single_col = OneHotEncoder(inputCol="neigh_id_index", outputCol="neigh_id_onehot")
 
-(training_data, test_data) = final_table_df.randomSplit([0.75, 0.25])
+subset_data.printSchema()
+
+assembler = VectorAssembler(inputCols=['neigh_id_onehot', 'price'], outputCol="indexed_features", handleInvalid="keep")
+
+(training_data, test_data) = subset_data.randomSplit([0.75, 0.25])
 
 rf = RandomForestClassifier(labelCol="indexed_status",
                             featuresCol="indexed_features",
@@ -78,16 +97,36 @@ rf = RandomForestClassifier(labelCol="indexed_status",
 
 labelConverter = IndexToString(inputCol="prediction", outputCol="predictedLabel", labels=labelIndexer_status.labels)
 
-pipeline = Pipeline(stages=[labelIndexer_status, labelIndexer_rooms] + indexers + [ohe_single_col, assembler, rf])
+pipeline = Pipeline().setStages([labelIndexer_status] + indexers + [ohe_single_col, assembler, rf, labelConverter])
 
 model = pipeline.fit(training_data)
 
-predictions = model.transform(test_data)
+# Apply the model on test_data
+predictions = model.transform(test_data).select("neigh_id", "price", "indexed_status","prediction", "predictedLabel")
 
-evaluator = MulticlassClassificationEvaluator(labelCol="indexed_status", predictionCol="prediction", metricName="accuracy")
-accuracy = evaluator.evaluate(predictions)
-print("Test Error = %g" % (1.0 - accuracy))  # 0.614
-print("Accuracy = %g" % (accuracy))
-rfModel = model.stages[-1]
+#evaluator = MulticlassClassificationEvaluator(labelCol="indexed_status", predictionCol="predictedLabel", metricName="accuracy")
+#accuracy = evaluator.evaluate(predictions)
 
+
+#prediction = predictions.select("neigh_id", "indexed_status", "prediction")
+
+# Show the predictions
+predictions.show()
+
+correct_predictions = predictions.filter(col("indexed_status") == col("prediction"))
+incorrect_predictions = predictions.filter(col("indexed_status") != col("prediction"))
+
+
+total_count = predictions.count()
+correct_count = correct_predictions.count()
+incorrect_count = incorrect_predictions.count()
+
+accuracy = correct_count / total_count
+
+print("Total Predictions: ", total_count)
+print("Correct Predictions: ", correct_count)
+print("Incorrect Predictions: ", incorrect_count)
+print("Accuracy: ", accuracy*100)
+
+rfModel = model.stages
 model.write().overwrite().save('exploitation/model_Random_forest')
