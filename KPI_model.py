@@ -72,7 +72,8 @@ KPI1_avg_price_neighborhood_pandas.to_csv('exploitation/KPI/KPI1_avg_price_neigh
 avg_rent_income_neighborhood = final_table_df.groupBy("neigh_id", "neigh").agg(F.avg("avg_rent").alias("average_rent"), F.avg("avg_income").alias("average_income"))
 KPI2_avg_rent_income_neighborhood = avg_rent_income_neighborhood
 KPI2_avg_rent_income_neighborhood.show()
-KPI2_avg_rent_income_neighborhood = KPI2_avg_rent_income_neighborhood.withColumn("average_rent", KPI2_avg_rent_income_neighborhood["average_income"].cast(IntegerType()))
+KPI2_avg_rent_income_neighborhood = KPI2_avg_rent_income_neighborhood.withColumn("average_rent", KPI2_avg_rent_income_neighborhood["average_rent"].cast(IntegerType()))
+KPI2_avg_rent_income_neighborhood = KPI2_avg_rent_income_neighborhood.withColumn("average_income", KPI2_avg_rent_income_neighborhood["average_income"].cast(IntegerType()))
 KPI2_avg_rent_income_neighborhood_pandas = KPI2_avg_rent_income_neighborhood.toPandas()
 KPI2_avg_rent_income_neighborhood_pandas.to_csv('exploitation/KPI/KPI2_avg_rent_income_neighborhood_pandas.csv', index=False)
 # 3. Correlation between neighborhood and status
