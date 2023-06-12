@@ -5,7 +5,7 @@ def connection_create():
     MONGO_HOST = "10.4.41.45"
     MONGO_USER = "bdm"
     MONGO_PASS = "perezmartinez"
-    MONGO_DB = "BDM_P2"
+    MONGO_DB = "Landing_BDM_P2"
 
     server = SSHTunnelForwarder(
         MONGO_HOST,
@@ -34,11 +34,5 @@ for collection in collections:
     print(f"Collection {collection} has {count} documents")
 
 print(pyspark.__version__)
-import pkg_resources
 
-installed_packages = [pkg.key for pkg in pkg_resources.working_set]
-if 'mongo-spark-connector' in installed_packages:
-    version = pkg_resources.get_distribution('mongo-spark-connector').version
-    print(f"mongo-spark-connector version: {version}")
-else:
-    print("mongo-spark-connector is not installed.")
+
